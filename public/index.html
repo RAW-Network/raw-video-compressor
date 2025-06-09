@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAW | Video Compressor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    (function() {
+      const theme = localStorage.getItem('theme');
+      if (theme === 'dark') document.documentElement.classList.add('dark-theme');
+      else if (theme === 'light') document.documentElement.classList.add('light-theme');
+    })();
+  </script>
+</head>
+<body>
+  <header class="navbar">
+    <div class="navbar-title">RAW Video Compressor</div>
+    <div class="theme-switcher">
+      <button class="theme-switcher-btn" id="theme-menu-btn" aria-label="Change theme">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/><circle cx="12" cy="12" r="5"/></svg>
+      </button>
+      <ul class="theme-dropdown" id="theme-dropdown">
+        <li><button id="theme-light">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/><circle cx="12" cy="12" r="5"/></svg>
+          <span>Light</span></button></li>
+        <li><button id="theme-dark">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <span>Dark</span></button></li>
+        <li><button id="theme-system" class="active">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          <span>System</span></button></li>
+      </ul>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <div class="container">
+      <h1 class="app-title">Video Compressor</h1>
+      <p class="section-subtitle">Easily Reduce Your Video File Size</p>
+
+      <form id="uploadForm" enctype="multipart/form-data" class="upload-form">
+        <div id="drop-area" class="drop-area">
+          <input type="file" id="fileElem" name="video" accept="video/*" required class="file-input">
+          <label class="button" for="fileElem">Select Video</label>
+          <p class="drop-message">or drag & drop a video here</p>
+        </div>
+        <div id="file-info" class="file-info"></div>
+        <div class="setting-group">
+          <label for="maxSize" class="setting-label">
+            <span>Maximum Output Size</span>
+            <span id="sizeValue" class="setting-value">10 MB</span>
+          </label>
+          <input type="range" id="maxSize" name="maxSize" min="1" max="100" value="10" class="setting-range">
+        </div>
+        <button type="submit" id="compressBtn" class="compress-button">Compress Video</button>
+      </form>
+
+      <section class="status-section">
+        <div class="progress-container" id="progress-container" hidden>
+          <div class="progress-bar">
+            <div class="progress-bar-inner" id="progress-bar-inner"></div>
+          </div>
+          <p class="progress-text" id="progress-text">0%</p>
+        </div>
+        <div id="status" class="status-message"></div>
+        <div id="result" class="result-area"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const uploadForm = document.getElementById('uploadForm');
+      const dropArea = document.getElementById('drop-area');
+      const fileElem = document.getElementById('fileElem');
+      const fileInfo = document.getElementById('file-info');
+      const statusDiv = document.getElementById('status');
+      const resultDiv = document.getElementById('result');
+      const maxSizeSlider = document.getElementById('maxSize');
+      const sizeValueSpan = document.getElementById('sizeValue');
+      const compressBtn = document.getElementById('compressBtn');
+      const progressContainer = document.getElementById('progress-container');
+      const progressBarInner = document.getElementById('progress-bar-inner');
+      const progressText = document.getElementById('progress-text');
+      let selectedFile = null;
+      let eventSource = null;
+
+      function resetUI() {
+        compressBtn.disabled = false;
+        progressContainer.hidden = true;
+        progressContainer.classList.remove('uploading');
+        progressBarInner.style.width = '0%';
+        progressText.textContent = '0%';
+        statusDiv.innerHTML = '';
+        resultDiv.innerHTML = '';
+      }
+
+      function updateProgress(percent, statusText) {
+        const percentage = Math.round(percent);
+        progressBarInner.style.width = `${percentage}%`;
+        progressText.textContent = `${statusText}... ${percentage}%`;
+      }
+
+      maxSizeSlider.addEventListener('input', (e) => sizeValueSpan.textContent = `${e.target.value} MB`);
+      ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropArea.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }));
+      ['dragenter', 'dragover'].forEach(eventName => dropArea.addEventListener(eventName, () => dropArea.classList.add('highlight')));
+      ['dragleave', 'drop'].forEach(eventName => dropArea.addEventListener(eventName, () => dropArea.classList.remove('highlight')));
+      dropArea.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        fileElem.files = files;
+        handleFiles(files);
+      });
+      fileElem.addEventListener('change', (e) => handleFiles(e.target.files));
+
+      function handleFiles(files) {
+        if (files.length > 0) {
+          selectedFile = files[0];
+          fileInfo.innerHTML = `<p>File: <strong>${selectedFile.name}</strong> (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</p>`;
+          resetUI();
+        }
+      }
+
+      uploadForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!selectedFile) {
+          alert('Please select a video file first.');
+          return;
+        }
+        resetUI();
+        progressContainer.hidden = false;
+        progressContainer.classList.add('uploading');
+        compressBtn.disabled = true;
+
+        const formData = new FormData();
+        formData.append('video', selectedFile);
+        formData.append('maxSize', maxSizeSlider.value);
+
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = (event.loaded / event.total) * 100;
+            updateProgress(percentComplete, 'Uploading');
+          }
+        });
+
+        xhr.addEventListener('load', () => {
+          progressContainer.classList.remove('uploading');
+          if (xhr.status === 200) {
+            const data = JSON.parse(xhr.responseText);
+            updateProgress(0, 'Compressing');
+            startProgressStream(data.jobId);
+          } else {
+            try {
+              const errorData = JSON.parse(xhr.responseText);
+              statusDiv.innerHTML = `<p class="error">❌ Upload Error: ${errorData.error}</p>`;
+            } catch {
+              statusDiv.innerHTML = `<p class="error">❌ Upload Error: ${xhr.statusText}</p>`;
+            }
+            resetUI();
+          }
+        });
+
+        xhr.addEventListener('error', () => {
+          statusDiv.innerHTML = '<p class="error">❌ A network error occurred during upload.</p>';
+          resetUI();
+        });
+
+        xhr.open('POST', '/upload', true);
+        xhr.send(formData);
+      });
+
+      function startProgressStream(jobId) {
+        eventSource = new EventSource(`/stream/${jobId}`);
+
+        eventSource.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === 'progress') {
+            updateProgress(data.value, 'Compressing');
+          } else if (data.type === 'done') {
+            statusDiv.innerHTML = '<p class="success">✅ Compression successful!</p>';
+            resultDiv.innerHTML = `<a href="${data.downloadUrl}" class="download-btn" download>Download Compressed Video</a>`;
+            eventSource.close();
+          } else if (data.type === 'error') {
+            statusDiv.innerHTML = `<p class="error">❌ Compression Error: ${data.message}</p>`;
+            eventSource.close();
+          }
+        };
+
+        eventSource.onerror = () => {
+          statusDiv.innerHTML = '<p class="error">❌ Connection to server lost.</p>';
+          eventSource.close();
+        };
+      }
+
+      const themeMenuBtn = document.getElementById('theme-menu-btn');
+      const themeDropdown = document.getElementById('theme-dropdown');
+      const themeOptions = {
+        light: document.getElementById('theme-light'),
+        dark: document.getElementById('theme-dark'),
+        system: document.getElementById('theme-system')
+      };
+
+      themeMenuBtn.addEventListener('click', () => {
+        themeDropdown.classList.toggle('show');
+      });
+
+      window.addEventListener('click', (e) => {
+        if (!themeMenuBtn.contains(e.target) && !themeDropdown.contains(e.target)) {
+          themeDropdown.classList.remove('show');
+        }
+      });
+
+      function applyTheme(theme) {
+        document.documentElement.classList.remove('light-theme', 'dark-theme');
+        if (theme === 'light' || theme === 'dark') {
+          localStorage.setItem('theme', theme);
+          document.documentElement.classList.add(`${theme}-theme`);
+        } else {
+          localStorage.removeItem('theme');
+        }
+        Object.values(themeOptions).forEach(btn => btn.classList.remove('active'));
+        themeOptions[theme].classList.add('active');
+        themeDropdown.classList.remove('show');
+      }
+
+      Object.entries(themeOptions).forEach(([themeName, btn]) => {
+        btn.addEventListener('click', () => applyTheme(themeName));
+      });
+
+      const savedTheme = localStorage.getItem('theme') || 'system';
+      applyTheme(savedTheme);
+    });
+  </script>
+</body>
+</html>

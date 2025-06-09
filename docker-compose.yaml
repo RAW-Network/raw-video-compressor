@@ -1,0 +1,12 @@
+services:
+  app:
+    build:
+      context: .
+    container_name: raw-video-compressor
+    ports:
+      - 3000:3000
+    volumes:
+      - ./compressed:/usr/src/app/compressed
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
