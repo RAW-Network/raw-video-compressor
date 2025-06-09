@@ -20,6 +20,80 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 const jobs = {};
+let encoderSettings;
+
+const getGpuVendor = () => {
+    return new Promise((resolve) => {
+        const platform = process.platform;
+        let command;
+
+        if (platform === 'win32') {
+            command = 'powershell -command "Get-CimInstance -ClassName Win32_VideoController | Select-Object -ExpandProperty Name"';
+        } else if (platform === 'linux') {
+            command = 'lspci | grep -i vga';
+        } else {
+            return resolve(null);
+        }
+
+        exec(command, (error, stdout) => {
+            if (error) {
+                return resolve(null);
+            }
+            const output = stdout.toLowerCase();
+            if (output.includes('nvidia')) {
+                return resolve('NVIDIA');
+            }
+            if (output.includes('amd') || output.includes('advanced micro devices') || output.includes('radeon')) {
+                return resolve('AMD');
+            }
+            if (output.includes('intel')) {
+                return resolve('INTEL');
+            }
+            resolve(null);
+        });
+    });
+};
+
+const detectGpuAndEncoder = async () => {
+    const vendor = await getGpuVendor();
+
+    if (vendor) {
+        try {
+            const ffmpegEncoders = await new Promise((resolve, reject) => {
+                exec('ffmpeg -encoders', (error, stdout) => {
+                    if (error) return reject();
+                    resolve(stdout);
+                });
+            });
+
+            if (vendor === 'NVIDIA' && ffmpegEncoders.includes('h264_nvenc')) {
+                console.log("✅ Found NVIDIA GPU with h264_nvenc encoder.");
+                return { codec: 'h264_nvenc', hwaccel: 'cuda', type: 'NVIDIA GPU' };
+            }
+
+            if (vendor === 'AMD') {
+                if (process.platform === 'win32' && ffmpegEncoders.includes('h264_amf')) {
+                    console.log("✅ Found AMD GPU with h264_amf encoder for Windows.");
+                    return { codec: 'h264_amf', hwaccel: 'd3d11va', type: 'AMD GPU' };
+                }
+                if (process.platform === 'linux' && ffmpegEncoders.includes('h264_vaapi')) {
+                    console.log("✅ Found AMD GPU with h264_vaapi encoder for Linux.");
+                    return { codec: 'h264_vaapi', hwaccel: 'vaapi', type: 'AMD GPU' };
+                }
+            }
+
+            if (vendor === 'INTEL' && ffmpegEncoders.includes('h264_qsv')) {
+                console.log("✅ Found Intel GPU with h264_qsv encoder.");
+                return { codec: 'h264_qsv', hwaccel: 'qsv', type: 'Intel GPU' };
+            }
+        } catch (error) {
+            // Fallthrough to CPU
+        }
+    }
+
+    console.log("🟡 GPU not detected or encoder not compatible. Using CPU.");
+    return { codec: 'libx264', hwaccel: null, type: 'CPU' };
+};
 
 app.use(express.static('public'));
 app.use('/compressed', express.static(path.join(__dirname, 'compressed')));
@@ -30,7 +104,7 @@ app.post('/upload', upload.single('video'), async (req, res) => {
     }
     try {
         const inputPath = req.file.path;
-        
+
         const getDuration = new Promise((resolve, reject) => {
             const durationCmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${inputPath}"`;
             exec(durationCmd, (error, stdout, stderr) => {
@@ -48,7 +122,7 @@ app.post('/upload', upload.single('video'), async (req, res) => {
 
         const totalDuration = await getDuration;
         const jobId = crypto.randomBytes(16).toString('hex');
-        
+
         jobs[jobId] = {
             inputPath,
             totalDuration,
@@ -61,7 +135,7 @@ app.post('/upload', upload.single('video'), async (req, res) => {
 
     } catch (err) {
         console.error('Upload Error:', err.message);
-        if (req.file) fs.unlink(req.file.path, () => {});
+        if (req.file) fs.unlink(req.file.path, () => { });
         res.status(500).json({ error: err.message });
     }
 });
@@ -88,17 +162,35 @@ app.get('/stream/:jobId', (req, res) => {
     const totalBitrate = (job.targetSizeMB * 8192) / job.totalDuration;
     const videoBitrate = Math.floor(totalBitrate * 0.8);
     const audioBitrate = Math.min(128, Math.floor(totalBitrate * 0.2));
-    
+
     const outputFilename = `compressed-${path.parse(job.originalName).name}-${Date.now()}.mp4`;
     const outputPath = path.join(compressedDir, outputFilename);
 
-    const ffmpeg = spawn('ffmpeg', [
-        '-y', '-i', job.inputPath,
-        '-c:v', 'libx264', '-b:v', `${videoBitrate}k`,
-        '-c:a', 'aac', '-b:a', `${audioBitrate}k`,
+    const inputArgs = [];
+    const filterArgs = [];
+
+    if (encoderSettings.codec === 'h264_qsv') {
+        inputArgs.push('-init_hw_device', 'qsv=hw', '-filter_hw_device', 'hw');
+        filterArgs.push('-vf', 'hwupload=extra_hw_frames=64');
+    } else if (encoderSettings.hwaccel) {
+        inputArgs.push('-hwaccel', encoderSettings.hwaccel);
+    }
+    
+    const ffmpegArgs = [
+        '-y',
+        ...inputArgs,
+        '-i', job.inputPath,
+        ...filterArgs,
+        '-c:v', encoderSettings.codec,
+        '-b:v', `${videoBitrate}k`,
+        '-c:a', 'aac',
+        '-b:a', `${audioBitrate}k`,
         '-progress', 'pipe:1',
         outputPath
-    ]);
+    ];
+
+    console.log(`[Job ${req.params.jobId}] Spawning ffmpeg with method: ${encoderSettings.type}`);
+    const ffmpeg = spawn('ffmpeg', ffmpegArgs);
 
     let lastProgress = -1;
 
@@ -115,7 +207,7 @@ app.get('/stream/:jobId', (req, res) => {
     ffmpeg.stdout.on('data', (chunk) => {
         progressData += chunk.toString();
         const lines = progressData.split('\n');
-        for (const line of lines) {
+        for (const line of lines.slice(0, -1)) {
             const match = line.match(/out_time_ms=(\d+)/);
             if (match) {
                 const currentTime = parseInt(match[1], 10) / 1000000;
@@ -140,7 +232,6 @@ app.get('/stream/:jobId', (req, res) => {
 
             const oneHourInMs = 60 * 60 * 1000;
             console.log(`File ${outputFilename} is scheduled for deletion in 1 hour.`);
-            
             setTimeout(() => {
                 fs.unlink(outputPath, (err) => {
                     if (err) {
@@ -150,9 +241,8 @@ app.get('/stream/:jobId', (req, res) => {
                     console.log(`File ${outputFilename} was automatically deleted.`);
                 });
             }, oneHourInMs);
-            
         } else {
-            fs.unlink(outputPath, () => {}); 
+            fs.unlink(outputPath, () => { });
             sendEvent({ type: 'error', message: 'Compression failed or was cancelled. Check server logs.' });
         }
         cleanup();
@@ -164,6 +254,10 @@ app.get('/stream/:jobId', (req, res) => {
     });
 });
 
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+(async () => {
+    encoderSettings = await detectGpuAndEncoder();
+    app.listen(PORT, () => {
+        console.log(`\n🚀 Server is running on http://localhost:${PORT}`);
+        console.log(`🎥 Using video encoder: ${encoderSettings.codec} (Type: ${encoderSettings.type})`);
+    });
+})();
