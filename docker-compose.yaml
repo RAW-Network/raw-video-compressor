@@ -1,12 +1,11 @@
 services:
-  app:
-    build:
-      context: .
+  raw-video-compressor:
+    image: ghcr.io/raw-network/raw-video-compressor:latest
     container_name: raw-video-compressor
     ports:
       - 3000:3000
     volumes:
       - ./compressed:/usr/src/app/compressed
     environment:
-      - NODE_ENV=production
+      - MAX_VIDEO_UPLOAD_SIZE=1024M
     restart: unless-stopped
