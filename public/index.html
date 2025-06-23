@@ -47,6 +47,7 @@
           <input type="file" id="fileElem" name="video" accept="video/*" required class="file-input">
           <label class="button" for="fileElem">Select Video</label>
           <p class="drop-message">or drag & drop a video here</p>
+          <p id="upload-limit-text" class="drop-message"></p>
         </div>
         <div id="file-info" class="file-info"></div>
         <div class="setting-group">
@@ -86,8 +87,39 @@
       const progressContainer = document.getElementById('progress-container');
       const progressBarInner = document.getElementById('progress-bar-inner');
       const progressText = document.getElementById('progress-text');
+      const uploadLimitText = document.getElementById('upload-limit-text');
+      
       let selectedFile = null;
       let eventSource = null;
+      let maxUploadSizeBytes = 0;
+      let maxUploadSizeString = '';
+
+      // Function to parse size string (e.g., "1024M") to bytes
+      const parseSizeToBytes = (sizeStr) => {
+          const size = parseFloat(sizeStr);
+          const unit = sizeStr.toUpperCase().slice(-1);
+          switch (unit) {
+              case 'G': return size * 1024 * 1024 * 1024;
+              case 'M': return size * 1024 * 1024;
+              case 'K': return size * 1024;
+              default: return size;
+          }
+      };
+      
+      // Fetch config from server to display and use the upload limit
+      fetch('/config')
+        .then(response => response.json())
+        .then(config => {
+          if (config.maxUploadSize) {
+            maxUploadSizeString = config.maxUploadSize;
+            maxUploadSizeBytes = parseSizeToBytes(maxUploadSizeString);
+            uploadLimitText.textContent = `Maximum upload size: ${maxUploadSizeString}`;
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching server config:', error);
+          uploadLimitText.textContent = 'Could not load upload limit.';
+        });
 
       function resetUI() {
         compressBtn.disabled = false;
@@ -122,6 +154,13 @@
           selectedFile = files[0];
           fileInfo.innerHTML = `<p>File: <strong>${selectedFile.name}</strong> (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</p>`;
           resetUI();
+
+          // Validate file size against the server limit
+          if (maxUploadSizeBytes > 0 && selectedFile.size > maxUploadSizeBytes) {
+            statusDiv.innerHTML = `<p class="error">❌ File is too large. Maximum size is ${maxUploadSizeString}.</p>`;
+            compressBtn.disabled = true; // Disable the compress button
+            return; // Stop further processing
+          }
         }
       }
 
@@ -131,6 +170,12 @@
           alert('Please select a video file first.');
           return;
         }
+        // This check is redundant if the button is disabled, but good for safety
+        if (maxUploadSizeBytes > 0 && selectedFile.size > maxUploadSizeBytes) {
+            alert(`File is too large. Maximum size is ${maxUploadSizeString}.`);
+            return;
+        }
+
         resetUI();
         progressContainer.hidden = false;
         progressContainer.classList.add('uploading');
@@ -198,6 +243,7 @@
         };
       }
 
+      // --- Theme switcher logic remains the same ---
       const themeMenuBtn = document.getElementById('theme-menu-btn');
       const themeDropdown = document.getElementById('theme-dropdown');
       const themeOptions = {
