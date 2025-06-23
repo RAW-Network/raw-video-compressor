@@ -13,11 +13,36 @@ const compressedDir = path.join(__dirname, 'compressed');
 fs.mkdirSync(uploadsDir, { recursive: true });
 fs.mkdirSync(compressedDir, { recursive: true });
 
+const parseSizeToBytes = (sizeStr) => {
+    const size = parseFloat(sizeStr);
+    const unit = sizeStr.toUpperCase().slice(-1);
+
+    switch (unit) {
+        case 'G':
+            return size * 1024 * 1024 * 1024;
+        case 'M':
+            return size * 1024 * 1024;
+        case 'K':
+            return size * 1024;
+        default:
+            return size;
+    }
+};
+
+const maxUploadSize = process.env.MAX_VIDEO_UPLOAD_SIZE || '1024M';
+const maxUploadSizeBytes = parseSizeToBytes(maxUploadSize);
+
 const storage = multer.diskStorage({
     destination: (_, __, cb) => cb(null, uploadsDir),
     filename: (_, file, cb) => cb(null, Buffer.from(file.originalname, 'latin1').toString('utf8'))
 });
-const upload = multer({ storage });
+
+const upload = multer({
+    storage,
+    limits: {
+        fileSize: maxUploadSizeBytes
+    }
+});
 
 const jobs = {};
 let encoderSettings;
@@ -87,7 +112,6 @@ const detectGpuAndEncoder = async () => {
                 return { codec: 'h264_qsv', hwaccel: 'qsv', type: 'Intel GPU' };
             }
         } catch (error) {
-            // Fallthrough to CPU
         }
     }
 
@@ -97,6 +121,12 @@ const detectGpuAndEncoder = async () => {
 
 app.use(express.static('public'));
 app.use('/compressed', express.static(path.join(__dirname, 'compressed')));
+
+app.get('/config', (req, res) => {
+    res.json({
+        maxUploadSize: maxUploadSize
+    });
+});
 
 app.post('/upload', upload.single('video'), async (req, res) => {
     if (!req.file) {
@@ -134,6 +164,11 @@ app.post('/upload', upload.single('video'), async (req, res) => {
         res.json({ jobId });
 
     } catch (err) {
+        if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+             console.error(`Upload Error: ${err.message}. File size exceeds the ${maxUploadSize} limit.`);
+             return res.status(413).json({ error: `File is too large. Maximum size is ${maxUploadSize}.` });
+        }
+        
         console.error('Upload Error:', err.message);
         if (req.file) fs.unlink(req.file.path, () => { });
         res.status(500).json({ error: err.message });
@@ -163,7 +198,9 @@ app.get('/stream/:jobId', (req, res) => {
     const videoBitrate = Math.floor(totalBitrate * 0.8);
     const audioBitrate = Math.min(128, Math.floor(totalBitrate * 0.2));
 
-    const outputFilename = `compressed-${path.parse(job.originalName).name}-${Date.now()}.mp4`;
+    const originalNameWithoutExt = path.basename(job.originalName, path.extname(job.originalName));
+    const sanitizedName = originalNameWithoutExt.replace(/[^a-zA-Z0-9 .-]/g, '').trim();
+    const outputFilename = `${sanitizedName}_RAW-VideoCompress.mp4`;
     const outputPath = path.join(compressedDir, outputFilename);
 
     const inputArgs = [];
@@ -259,5 +296,6 @@ app.get('/stream/:jobId', (req, res) => {
     app.listen(PORT, () => {
         console.log(`\n🚀 Server is running on http://localhost:${PORT}`);
         console.log(`🎥 Using video encoder: ${encoderSettings.codec} (Type: ${encoderSettings.type})`);
+        console.log(`🔒 Maximum upload size set to: ${maxUploadSize}`);
     });
 })();
