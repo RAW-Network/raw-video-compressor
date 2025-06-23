@@ -58,13 +58,12 @@ cd raw-video-compressor
 This is the easiest and most consistent method.
 
 1. Make sure Docker is running.
-2. Build and run the container:
+2. Use Docker Compose to run the container:
 
 ```bash
-docker compose up --build -d
+docker compose up -d
 ```
 
-* `--build`: Builds the image on first run or after changes.
 * `-d`: Runs the container in detached mode.
 
 3. Open your browser at:
