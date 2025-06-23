@@ -94,7 +94,6 @@
       let maxUploadSizeBytes = 0;
       let maxUploadSizeString = '';
 
-      // Function to parse size string (e.g., "1024M") to bytes
       const parseSizeToBytes = (sizeStr) => {
           const size = parseFloat(sizeStr);
           const unit = sizeStr.toUpperCase().slice(-1);
@@ -106,7 +105,6 @@
           }
       };
       
-      // Fetch config from server to display and use the upload limit
       fetch('/config')
         .then(response => response.json())
         .then(config => {
@@ -155,11 +153,10 @@
           fileInfo.innerHTML = `<p>File: <strong>${selectedFile.name}</strong> (${(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</p>`;
           resetUI();
 
-          // Validate file size against the server limit
           if (maxUploadSizeBytes > 0 && selectedFile.size > maxUploadSizeBytes) {
             statusDiv.innerHTML = `<p class="error">❌ File is too large. Maximum size is ${maxUploadSizeString}.</p>`;
-            compressBtn.disabled = true; // Disable the compress button
-            return; // Stop further processing
+            compressBtn.disabled = true;
+            return;
           }
         }
       }
@@ -170,7 +167,7 @@
           alert('Please select a video file first.');
           return;
         }
-        // This check is redundant if the button is disabled, but good for safety
+
         if (maxUploadSizeBytes > 0 && selectedFile.size > maxUploadSizeBytes) {
             alert(`File is too large. Maximum size is ${maxUploadSizeString}.`);
             return;
@@ -243,7 +240,6 @@
         };
       }
 
-      // --- Theme switcher logic remains the same ---
       const themeMenuBtn = document.getElementById('theme-menu-btn');
       const themeDropdown = document.getElementById('theme-dropdown');
       const themeOptions = {
