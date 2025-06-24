@@ -1,11 +1,16 @@
 services:
   raw-video-compressor:
     image: ghcr.io/raw-network/raw-video-compressor:latest
-    container_name: raw-video-compressor
+   container_name: raw-video-compressor
     ports:
       - 3000:3000
+    devices:
+      - /dev/dri
     volumes:
       - ./compressed:/usr/src/app/compressed
+      - ./uploads:/usr/src/app/uploads
     environment:
       - MAX_VIDEO_UPLOAD_SIZE=1024M
+      - FORCE_CPU_ENCODER=false
+      - TZ=Asia/Makassar
     restart: unless-stopped
