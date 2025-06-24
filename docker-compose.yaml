@@ -1,7 +1,7 @@
 services:
   raw-video-compressor:
     image: ghcr.io/raw-network/raw-video-compressor:latest
-   container_name: raw-video-compressor
+    container_name: raw-video-compressor
     ports:
       - 3000:3000
     devices:
