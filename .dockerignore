@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+.dockerignore
+Dockerfile
+LICENSE
+README.md
+docker-compose.yaml
+.git
+compressed
+uploads
+*.log
